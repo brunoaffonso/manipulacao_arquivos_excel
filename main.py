@@ -1,89 +1,94 @@
 from datetime import date
-from openpyxl import Workbook
-from openpyxl.chart import LineChart, Reference
-from openpyxl.drawing.image import Image
+from openpyxl.chart import Reference
 from openpyxl.styles import Font, PatternFill, Alignment
 
+try:
+    # stock = input('Código da Ação: ').upper()
+    from classes import StocksReader, SpreadsheetManager, ChartSeriesProperties
 
-# acao = input('Código da Ação: ').upper()
+    stock = 'BIDI4a'
 
-acao = 'BIDI4'
+    stocks_reader = StocksReader(path='./dados/')
+    stocks_reader.file_process(stock)
 
-with open(f'./dados/{acao}.txt', 'r') as arquivo_cotacao:
-    linhas = arquivo_cotacao.readlines()
-    linhas = [linha.replace('/n', '').split(';') for linha in linhas]
+    manager = SpreadsheetManager()
+    data_spreadsheet = manager.add_spreadsheet('Dados')
 
-workbook = Workbook()
-planilha_ativa = workbook.active
-planilha_ativa.title = 'Dados'
+    manager.add_line(['DATA', 'COTAÇÃO', 'BANDA INFERIOR', 'BANDA SUPERIOR'])
 
-planilha_ativa.append(['DATA', 'COTAÇÃO', 'BANDA INFERIOR', 'BANDA SUPERIOR'])
+    index = 2
 
-indice = 2
+    for line in stocks_reader.data:
+        # Data
+        year_month_day = line[0].split(' ')[0]
+        date_ = date(
+            year=int(year_month_day.split('-')[0]),
+            month=int(year_month_day.split('-')[1]),
+            day=int(year_month_day.split('-')[2])
+        )
 
-for linha in linhas:
-    # Data
-    ano_mes_dia = linha[0].split(' ')[0]
-    data = date(
-        year=int(ano_mes_dia.split('-')[0]),
-        month=int(ano_mes_dia.split('-')[1]),
-        day=int(ano_mes_dia.split('-')[2])
+        # Price
+        price = float(line[1])
+
+        bb_higher_formule = f'=AVERAGE(B{index}:B{index + 19}) - 2*STDEV(B{index}:B{index + 19})'
+        bb_bottom_formule = f'=AVERAGE(B{index}:B{index + 19}) + 2*STDEV(B{index}:B{index + 19})'
+
+        # Update cells from active spreadsheet
+        manager.update_cell(cell=f'A{index}', data=date_)
+        manager.update_cell(cell=f'B{index}', data=price)
+        manager.update_cell(cell=f'C{index}', data=bb_bottom_formule)
+        manager.update_cell(cell=f'D{index}', data=bb_higher_formule)
+
+        index += 1
+
+    manager.add_spreadsheet('Gráfico')
+
+    # Mergin header cells
+    manager.merge_spreadsheet_cells(start_cell='A1', end_cell='T2')
+
+    manager.apply_style(
+        cell='A1',
+        styles=[
+            ('font', Font(name='Calibri', b=True, sz=18, color='FFFFFF')),
+            ('fill', PatternFill('solid', fgColor='07838F')),
+            ('alignment', Alignment(vertical='center', horizontal='center')),
+        ]
     )
 
-    # Cotação
-    cotacao = float(linha[1])
+    manager.update_cell('A1', 'Histórico de Cotações')
 
-    # Atualiza as células da Planilha Ativa do Excel
-    planilha_ativa[f'A{indice}'] = data
-    planilha_ativa[f'B{indice}'] = cotacao
-    planilha_ativa[f'C{indice}'] = f'=AVERAGE(B{indice}:B{indice + 19}) - ' \
-                                   f'2*STDEV(B{indice}:B{indice + 19})'
+    price_references = Reference(data_spreadsheet, min_col=2, min_row=2, max_col=4, max_row=index)
+    date_references = Reference(data_spreadsheet, min_col=1, min_row=2, max_col=1, max_row=index)
 
-    planilha_ativa[f'D{indice}'] = f'=AVERAGE(B{indice}:B{indice + 19}) + ' \
-                                   f'2*STDEV(B{indice}:B{indice + 19})'
+    manager.add_line_chart(
+        cell='A3',
+        width=33.87,
+        height=14.82,
+        title=f'Cotações - {stock}',
+        x_axis_title='Data da Cotação',
+        y_axis_title='Valor da Cotação',
+        x_axis_reference=price_references,
+        y_axis_reference=date_references,
+        chart_properties=[
+            ChartSeriesProperties(width=0, solid_fill_color='0A55AB'),
+            ChartSeriesProperties(width=0, solid_fill_color='A61508'),
+            ChartSeriesProperties(width=0, solid_fill_color='12A154'),
+        ]
+    )
 
-    indice += 1
+    manager.merge_spreadsheet_cells(start_cell='I32', end_cell='L35')
+    manager.add_spreadsheet_image(cell='I32', image_path='./recursos/python.png')
 
-planilha_grafico = workbook.create_sheet('Gráfico')
-workbook.active = planilha_grafico
+    manager.save_file('./saida/planilha_refactor.xlsx')
 
-# Mesclagem de células cabeçalho
-planilha_grafico.merge_cells('A1:T2')
-cabecalho = planilha_grafico['A1']
-cabecalho.font = Font(name='Calibri', b=True, sz=18, color='FFFFFF')
-cabecalho.fill = PatternFill('solid', fgColor='07838F')
-cabecalho.alignment = Alignment(vertical='center', horizontal='center')
-cabecalho.value = 'Histórico de Cotações'
+except AttributeError:
+    print('Atributo não existe!')
 
-grafico = LineChart()
-grafico.width = 33.87
-grafico.height = 14.82
-grafico.title = f'Cotações - {acao}'
-grafico.x_axis.title = 'Data da Cotação'
-grafico.y_axis.title = 'Valor da Cotação'
+except ValueError:
+    print('Formato de dados incorreto. Necessita verificação!')
 
-referencia_cotacoes = Reference(planilha_ativa, min_col=2, min_row=2, max_col=4, max_row=indice)
-referencia_datas = Reference(planilha_ativa, min_col=1, min_row=2, max_col=1, max_row=indice)
-grafico.add_data(referencia_cotacoes)
-grafico.set_categories(referencia_datas)
+except FileNotFoundError:
+    print('Arquivo não encontrado!')
 
-linha_cotacoes = grafico.series[0]
-linha_bb_inferior = grafico.series[1]
-linha_bb_superior = grafico.series[2]
-
-linha_cotacoes.graphicalProperties.line.width = 0
-linha_cotacoes.graphicalProperties.line.solidFill = '0A55AB'
-
-linha_bb_inferior.graphicalProperties.line.width = 0
-linha_bb_inferior.graphicalProperties.line.solidFill = 'A61508'
-
-linha_bb_superior.graphicalProperties.line.width = 0
-linha_bb_superior.graphicalProperties.line.solidFill = '12A154'
-
-planilha_grafico.add_chart(grafico, 'A3')
-
-imagem = Image('./recursos/python.png')
-planilha_grafico.merge_cells('I32:L35')
-planilha_grafico.add_image(imagem, 'I32')
-
-workbook.save(f'./saida/planilha.xlsx')
+except Exception as excecao:
+    print(f'Ocorreu um erro durante a execução do programa. Erro: {excecao}')
